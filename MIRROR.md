@@ -8,5 +8,5 @@ It exists because the upstream repository is no longer reachable on GitHub.
 Nothing in the dynarmic sources has been modified; see `LICENSE.txt` (0BSD) and
 the licenses inside `externals/` for the original terms.
 
-Used as a submodule by [PlantsVsZombies-AndroidTV](https://github.com/SaMeiers/PlantsVsZombies-AndroidTV)
+Used as a submodule by [PvZ-TV-Anywhere](https://github.com/SaMeiers/PvZ-TV-Anywhere)
 to run the game's 32-bit ARM code on arm64 Android and on PC.
