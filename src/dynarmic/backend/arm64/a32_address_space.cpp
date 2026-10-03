@@ -323,7 +323,12 @@ void A32AddressSpace::EmitPrelude() {
         code.BR(X0);
 
         const auto fn = [](A32AddressSpace& self, A32JitState& context) -> CodePtr {
-            return self.GetOrEmit(context.GetLocationDescriptor());
+            const IR::LocationDescriptor location = context.GetLocationDescriptor();
+            const CodePtr code_ptr = self.GetOrEmit(location);
+            if (self.conf.HasOptimization(OptimizationFlag::FastDispatch)) {
+                self.FastDispatchFill(location.Value(), code_ptr);
+            }
+            return code_ptr;
         };
 
         code.align(8);
@@ -331,6 +336,42 @@ void A32AddressSpace::EmitPrelude() {
         code.dx(mcl::bit_cast<u64>(this));
         code.l(l_addr);
         code.dx(mcl::bit_cast<u64>(Common::FptrCast(fn)));
+    }
+
+    prelude_info.fast_dispatch = code.xptr<void*>();
+    if (conf.HasOptimization(OptimizationFlag::FastDispatch)) {
+        oaknut::Label l_table, l_miss;
+
+        // The same checks the dispatcher makes, so a loop of indirect branches
+        // still notices a halt request.
+        code.LDAR(Wscratch0, Xhalt);
+        code.CBNZ(Wscratch0, return_from_run_code);
+
+        if (conf.enable_cycle_counting) {
+            code.CMP(Xticks, 0);
+            code.B(LE, return_from_run_code);
+        }
+
+        // regs[15] and upper_location_descriptor are adjacent, so one 64-bit
+        // load is the whole LocationDescriptor (as PopRSBHint relies on too).
+        code.LDUR(X0, Xstate, offsetof(A32JitState, regs) + 15 * sizeof(u32));
+        code.LDR(X1, l_table);
+        code.EOR(X2, X0, X0, oaknut::LogShift::LSR, 32);
+        code.UBFX(X2, X2, 1, fast_dispatch_table_bits);
+        code.ADD(X1, X1, X2, oaknut::AddSubShift::LSL, 4);
+        code.LDP(Xscratch0, Xscratch1, X1);
+        code.CMP(X0, Xscratch0);
+        code.B(NE, l_miss);
+        code.BR(Xscratch1);
+
+        code.l(l_miss);
+        code.B(prelude_info.return_to_dispatcher);
+
+        code.align(8);
+        code.l(l_table);
+        code.dx(mcl::bit_cast<u64>(fast_dispatch_table.data()));
+    } else {
+        code.B(prelude_info.return_to_dispatcher);
     }
 
     prelude_info.return_from_run_code = code.xptr<void*>();

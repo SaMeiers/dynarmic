@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: 0BSD
  */
 
+#include <algorithm>
 #include <cstdio>
 
 #include <mcl/bit_cast.hpp>
@@ -24,8 +25,10 @@ AddressSpace::AddressSpace(size_t code_cache_size)
         : code_cache_size(code_cache_size)
         , mem(code_cache_size)
         , code(mem.ptr(), mem.ptr())
-        , fastmem_manager(exception_handler) {
+        , fastmem_manager(exception_handler)
+        , fast_dispatch_table(size_t{1} << fast_dispatch_table_bits) {
     ASSERT_MSG(code_cache_size <= 128 * 1024 * 1024, "code_cache_size > 128 MiB not currently supported");
+    ClearFastDispatchTable();
 
     exception_handler.Register(mem, code_cache_size);
     exception_handler.SetFastmemCallback([this](u64 host_pc) {
@@ -86,7 +89,16 @@ void AddressSpace::InvalidateBasicBlocks(const tsl::robin_set<IR::LocationDescri
         block_entries.erase(iter);
     }
 
+    // Cheaper to start the cache over than to hunt down each descriptor's
+    // slot, and invalidation is rare.
+    ClearFastDispatchTable();
+
     ProtectCodeMemory();
+}
+
+void AddressSpace::ClearFastDispatchTable() {
+    // A descriptor no block can have, so every slot misses until filled.
+    std::fill(fast_dispatch_table.begin(), fast_dispatch_table.end(), FastDispatchEntry{~u64{0}, nullptr});
 }
 
 void AddressSpace::ClearCache() {
@@ -94,6 +106,7 @@ void AddressSpace::ClearCache() {
     reverse_block_entries.clear();
     block_infos.clear();
     block_references.clear();
+    ClearFastDispatchTable();
     code.set_offset(prelude_info.end_of_prelude);
 }
 
@@ -145,6 +158,9 @@ void AddressSpace::Link(EmittedBlockInfo& block_info) {
             break;
         case LinkTarget::ReturnFromRunCode:
             c.B(prelude_info.return_from_run_code);
+            break;
+        case LinkTarget::FastDispatch:
+            c.B(prelude_info.fast_dispatch);
             break;
         case LinkTarget::ReadMemory8:
             c.BL(prelude_info.read_memory_8);

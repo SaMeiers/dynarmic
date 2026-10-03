@@ -481,6 +481,7 @@ void A64AddressSpace::EmitPrelude() {
     }
 
     prelude_info.return_to_dispatcher = code.xptr<void*>();
+    prelude_info.fast_dispatch = prelude_info.return_to_dispatcher;  // A64 has no fast dispatch yet
     {
         oaknut::Label l_this, l_addr;
 

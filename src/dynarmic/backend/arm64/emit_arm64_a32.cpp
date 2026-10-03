@@ -115,13 +115,21 @@ void EmitA32Terminal(oaknut::CodeGenerator& code, EmitContext& ctx, IR::Term::Po
         code.l(fail);
     }
 
+    // A missed prediction is just an indirect branch: try the fast dispatch
+    // cache before the dispatcher.
+    if (ctx.conf.HasOptimization(OptimizationFlag::FastDispatch) && !is_single_step) {
+        EmitRelocation(code, ctx, LinkTarget::FastDispatch);
+        return;
+    }
     EmitRelocation(code, ctx, LinkTarget::ReturnToDispatcher);
 }
 
-void EmitA32Terminal(oaknut::CodeGenerator& code, EmitContext& ctx, IR::Term::FastDispatchHint, IR::LocationDescriptor, bool) {
+void EmitA32Terminal(oaknut::CodeGenerator& code, EmitContext& ctx, IR::Term::FastDispatchHint, IR::LocationDescriptor, bool is_single_step) {
+    if (ctx.conf.HasOptimization(OptimizationFlag::FastDispatch) && !is_single_step) {
+        EmitRelocation(code, ctx, LinkTarget::FastDispatch);
+        return;
+    }
     EmitRelocation(code, ctx, LinkTarget::ReturnToDispatcher);
-
-    // TODO: Implement FastDispatchHint optimization
 }
 
 void EmitA32Terminal(oaknut::CodeGenerator& code, EmitContext& ctx, IR::Term::If terminal, IR::LocationDescriptor initial_location, bool is_single_step) {

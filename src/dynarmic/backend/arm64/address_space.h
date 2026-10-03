@@ -7,6 +7,7 @@
 
 #include <map>
 #include <optional>
+#include <vector>
 
 #include <mcl/stdint.hpp>
 #include <oaknut/code_block.hpp>
@@ -44,6 +45,30 @@ public:
     void ClearCache();
 
     void DumpDisassembly() const;
+
+    // Fast dispatch: a direct-mapped cache of LocationDescriptor -> entry point
+    // that the prelude's fast_dispatch handler probes in emitted code, so an
+    // indirect branch (BX reg, LDR PC, a missed return-stack prediction) does
+    // not have to leave the JIT for a hash-map lookup in GetOrEmit. The
+    // dispatcher fills it on every miss; anything that removes blocks clears it.
+    struct FastDispatchEntry {
+        u64 location_descriptor;
+        CodePtr code_ptr;
+    };
+    static_assert(sizeof(FastDispatchEntry) == 16);
+    static constexpr size_t fast_dispatch_table_bits = 14;
+    static constexpr u64 fast_dispatch_table_mask = (u64{1} << fast_dispatch_table_bits) - 1;
+
+    static constexpr size_t FastDispatchIndex(u64 location_descriptor) {
+        // Mirrored in the emitted lookup: EOR x, d, d, LSR #32; UBFX x, x, #1, #bits.
+        return static_cast<size_t>(((location_descriptor ^ (location_descriptor >> 32)) >> 1) & fast_dispatch_table_mask);
+    }
+
+    void FastDispatchFill(u64 location_descriptor, CodePtr code_ptr) {
+        fast_dispatch_table[FastDispatchIndex(location_descriptor)] = {location_descriptor, code_ptr};
+    }
+
+    void ClearFastDispatchTable();
 
 protected:
     virtual EmitConfig GetEmitConfig() = 0;
@@ -83,6 +108,8 @@ protected:
     ExceptionHandler exception_handler;
     FastmemManager fastmem_manager;
 
+    std::vector<FastDispatchEntry> fast_dispatch_table;
+
     struct PreludeInfo {
         std::ptrdiff_t end_of_prelude;
 
@@ -91,6 +118,7 @@ protected:
         RunCodeFuncType step_code;
         void* return_to_dispatcher;
         void* return_from_run_code;
+        void* fast_dispatch;
 
         void* read_memory_8;
         void* read_memory_16;
